@@ -233,6 +233,12 @@ namespace Components
 
 		packetCommand = Utils::String::ToLower(packetCommand);
 
+		// new hook overrides the disconnect command which might still be needed
+		if (!packetCommand.compare("disconnect"))
+		{
+			return 1;
+		}
+
 		// Check if custom handler exists
 		for (auto i = Network::PacketHandlers.begin(); i != Network::PacketHandlers.end(); ++i)
 		{
@@ -296,24 +302,19 @@ namespace Components
 	{
 		__asm
 		{
-			lea eax, [esp + 0C54h]
+			lea eax, [esp + 408h]
 
 			pushad
 
-			push ebp // Command
-			push eax // Address pointer
+			push esi // from 
+			push eax // msg 
 			call Network::DeployPacket
 			add esp, 8h
 
 			popad
 
-			mov al, 1
-			pop edi
-			pop esi
-			pop ebp
-			pop ebx
-			add esp, 0C40h
-			retn
+			push 6266E0h
+			ret
 		}
 	}
 
@@ -330,9 +331,9 @@ namespace Components
 			push 465325h
 			retn
 
-		returnIgnore:
+			returnIgnore:
 			push 4654C6h
-			retn
+				retn
 		}
 	}
 
@@ -370,21 +371,21 @@ namespace Components
 		Utils::Hook(0x4FD4D4, Network::NetworkStartStub, HOOK_JUMP).install()->quick();
 
 		// Install interception handler
-		Utils::Hook(0x5AA709, Network::PacketInterceptionHandler, HOOK_CALL).install()->quick();
+		Utils::Hook(0x6266D0, Network::PacketInterceptionHandler, HOOK_CALL).install()->quick();
 
 		// Prevent recvfrom error spam
 		Utils::Hook(0x46531A, Network::PacketErrorCheck, HOOK_JUMP).install()->quick();
 
 		// Install packet deploy hook
-		Utils::Hook::RedirectJump(0x5AA713, Network::DeployPacketStub);
+		Utils::Hook::RedirectJump(0x6266DA, Network::DeployPacketStub);
 
 		// Fix packets causing buffer overflow
 		Utils::Hook(0x6267E3, Network::NET_DeferPacketToClientStub, HOOK_CALL).install()->quick();
 
 		Network::Handle("resolveAddress", [](Address address, const std::string& /*data*/)
-		{
-			Network::SendRaw(address, address.getString());
-		});
+			{
+				Network::SendRaw(address, address.getString());
+			});
 	}
 
 	Network::~Network()
