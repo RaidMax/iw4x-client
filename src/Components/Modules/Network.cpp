@@ -14,7 +14,7 @@ namespace Components
 	{
 		Game::SockadrToNetadr(addr, &this->address);
 	}
-	bool Network::Address::operator==(const Network::Address &obj) const
+	bool Network::Address::operator==(const Network::Address& obj) const
 	{
 		return Game::NET_CompareAdr(this->address, obj.address);
 	}
@@ -233,12 +233,6 @@ namespace Components
 
 		packetCommand = Utils::String::ToLower(packetCommand);
 
-		// new hook overrides the disconnect command which might still be needed
-		if (!packetCommand.compare("disconnect"))
-		{
-			return 1;
-		}
-
 		// Check if custom handler exists
 		for (auto i = Network::PacketHandlers.begin(); i != Network::PacketHandlers.end(); ++i)
 		{
@@ -298,7 +292,33 @@ namespace Components
 		}
 	}
 
-	__declspec(naked) void Network::DeployPacketStub()
+	__declspec(naked) void Network::ClientDeployPacketStub()
+	{
+
+		__asm
+		{
+			lea eax, [esp + 0C54h]
+
+			pushad
+
+			push ebp // Command
+			push eax // Address pointer
+			call Network::DeployPacket
+			add esp, 8h
+
+			popad
+
+			mov al, 1
+			pop edi
+			pop esi
+			pop ebp
+			pop ebx
+			add esp, 0C40h
+			retn
+		}
+	}
+
+	__declspec(naked) void Network::ServerDeployPacketStub()
 	{
 		__asm
 		{
@@ -309,11 +329,23 @@ namespace Components
 			push esi // from 
 			push eax // msg 
 			call Network::DeployPacket
-			add esp, 8h
+			add esp, 8
+			test al, al
 
 			popad
 
-			push 6266E0h
+			jnz unhandled
+			handled:
+			push 6267EBh
+			ret
+
+			unhandled :
+			mov eax, 426080h
+			call eax // original "disconnect" compare
+			add esp, 8
+			test al, al
+			jz handled
+			push 6266E0h // next compare
 			ret
 		}
 	}
@@ -331,7 +363,7 @@ namespace Components
 			push 465325h
 			retn
 
-			returnIgnore:
+			returnIgnore :
 			push 4654C6h
 				retn
 		}
@@ -370,22 +402,36 @@ namespace Components
 		// Install startup handler
 		Utils::Hook(0x4FD4D4, Network::NetworkStartStub, HOOK_JUMP).install()->quick();
 
-		// Install interception handler
-		Utils::Hook(0x6266D0, Network::PacketInterceptionHandler, HOOK_CALL).install()->quick();
+		if (Dedicated::IsEnabled())
+		{
+			// Install interception handler for SV_ConnectionlessPacket
+			Utils::Hook(0x6266D0, Network::PacketInterceptionHandler, HOOK_CALL).install()->quick();
+
+			// Install packet deploy hook
+			Utils::Hook::RedirectJump(0x6266DA, Network::ServerDeployPacketStub);
+		}
+
+		else
+		{
+			// Install interception handler for CL_ConnectionlessPacket
+			Utils::Hook(0x5AA709, Network::PacketInterceptionHandler, HOOK_CALL).install()->quick();
+
+			// Install packet deploy hook
+			Utils::Hook::RedirectJump(0x5AA713, Network::ClientDeployPacketStub);
+		}
 
 		// Prevent recvfrom error spam
 		Utils::Hook(0x46531A, Network::PacketErrorCheck, HOOK_JUMP).install()->quick();
 
-		// Install packet deploy hook
-		Utils::Hook::RedirectJump(0x6266DA, Network::DeployPacketStub);
+
 
 		// Fix packets causing buffer overflow
 		Utils::Hook(0x6267E3, Network::NET_DeferPacketToClientStub, HOOK_CALL).install()->quick();
 
 		Network::Handle("resolveAddress", [](Address address, const std::string& /*data*/)
-			{
-				Network::SendRaw(address, address.getString());
-			});
+		{
+			Network::SendRaw(address, address.getString());
+		});
 	}
 
 	Network::~Network()
