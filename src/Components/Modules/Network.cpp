@@ -330,22 +330,10 @@ namespace Components
 			push eax // msg 
 			call Network::DeployPacket
 			add esp, 8
-			test al, al
 
 			popad
 
-			jnz unhandled
-			handled:
 			push 6267EBh
-			ret
-
-			unhandled :
-			mov eax, 426080h
-			call eax // original "disconnect" compare
-			add esp, 8
-			test al, al
-			jz handled
-			push 6266E0h // next compare
 			ret
 		}
 	}
