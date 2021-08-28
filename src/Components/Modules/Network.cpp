@@ -292,20 +292,27 @@ namespace Components
 		}
 	}
 
+	bool ShouldDeployClientPacket()
+	{
+		return Party::IsEnabled() || !Dedicated::IsEnabled();
+	}
+
 	__declspec(naked) void Network::ClientDeployPacketStub()
 	{
-
 		__asm
 		{
-			lea eax, [esp + 0C54h]
-
 			pushad
 
+			call ShouldDeployClientPacket
+			test al, al
+			je skip
+
+			lea eax, [esp + 0C54h + 20h]
 			push ebp // Command
 			push eax // Address pointer
 			call Network::DeployPacket
 			add esp, 8h
-
+		skip:
 			popad
 
 			mov al, 1
@@ -399,14 +406,11 @@ namespace Components
 			Utils::Hook::RedirectJump(0x6266DA, Network::ServerDeployPacketStub);
 		}
 
-		else
-		{
-			// Install interception handler for CL_ConnectionlessPacket
-			Utils::Hook(0x5AA709, Network::PacketInterceptionHandler, HOOK_CALL).install()->quick();
+		// Install interception handler for CL_ConnectionlessPacket
+		Utils::Hook(0x5AA709, Network::PacketInterceptionHandler, HOOK_CALL).install()->quick();
 
-			// Install packet deploy hook
-			Utils::Hook::RedirectJump(0x5AA713, Network::ClientDeployPacketStub);
-		}
+		// Install packet deploy hook
+		Utils::Hook::RedirectJump(0x5AA713, Network::ClientDeployPacketStub);
 
 		// Prevent recvfrom error spam
 		Utils::Hook(0x46531A, Network::PacketErrorCheck, HOOK_JUMP).install()->quick();

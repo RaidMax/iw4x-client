@@ -4,6 +4,7 @@ namespace Components
 {
 	Party::JoinContainer Party::Container;
 	std::map<uint64_t, Network::Address> Party::LobbyMap;
+	Game::dvar_t* PartyEnable;
 
 	SteamID Party::GenerateLobbyId()
 	{
@@ -148,9 +149,14 @@ namespace Components
 		return (Party::IsInLobby() && Maps::IsUserMap(Dvar::Var("ui_mapname").get<const char*>()));
 	}
 
+	bool Party::IsEnabled()
+	{
+		return PartyEnable->current.enabled;
+	}
+
 	Party::Party()
 	{
-		static Game::dvar_t* partyEnable = Dvar::Register<bool>("party_enable", Dedicated::IsEnabled(), Game::dvar_flag::DVAR_FLAG_NONE, "Enable party system").get<Game::dvar_t*>();
+		PartyEnable = Dvar::Register<bool>("party_enable", Dedicated::IsEnabled(), Game::dvar_flag::DVAR_FLAG_NONE, "Enable party system").get<Game::dvar_t*>();
 		Dvar::Register<bool>("xblive_privatematch", true, Game::dvar_flag::DVAR_FLAG_WRITEPROTECTED, "").get<Game::dvar_t*>();
 
 		// various changes to SV_DirectConnect-y stuff to allow non-party joinees
@@ -228,9 +234,9 @@ namespace Components
 		Utils::Hook::Nop(0x4077A1, 5); // PartyMigrate_Frame
 
 		// Patch playlist stuff for non-party behavior
-		Utils::Hook::Set<Game::dvar_t**>(0x4A4093, &partyEnable);
-		Utils::Hook::Set<Game::dvar_t**>(0x4573F1, &partyEnable);
-		Utils::Hook::Set<Game::dvar_t**>(0x5B1A0C, &partyEnable);
+		Utils::Hook::Set<Game::dvar_t**>(0x4A4093, &PartyEnable);
+		Utils::Hook::Set<Game::dvar_t**>(0x4573F1, &PartyEnable);
+		Utils::Hook::Set<Game::dvar_t**>(0x5B1A0C, &PartyEnable);
 
 		// Invert corresponding jumps
 		Utils::Hook::Xor<BYTE>(0x4A409B, 1);
