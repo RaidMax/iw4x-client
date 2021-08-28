@@ -292,7 +292,7 @@ namespace Components
 		}
 	}
 
-	bool ShouldDeployClientPacket()
+	bool Network::ShouldDeployClientPacket()
 	{
 		return Party::IsEnabled() || !Dedicated::IsEnabled();
 	}
@@ -333,8 +333,8 @@ namespace Components
 
 			pushad
 
-			push esi // from 
-			push eax // msg 
+			push esi // msg 
+			push eax // from 
 			call Network::DeployPacket
 			add esp, 8
 
@@ -358,9 +358,9 @@ namespace Components
 			push 465325h
 			retn
 
-			returnIgnore :
+		returnIgnore:
 			push 4654C6h
-				retn
+			retn
 		}
 	}
 

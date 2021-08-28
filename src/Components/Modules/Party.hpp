@@ -51,6 +51,6 @@ namespace Components
 		static Game::dvar_t* RegisterMinPlayers(const char* name, int value, int min, int max, Game::dvar_flag flag, const char* description);
 
 		static DWORD UIDvarIntStub(char* dvar);
-		static Game::dvar_t* PartyEnable;
+		static Dvar::Var PartyEnable;
 	};
 }
