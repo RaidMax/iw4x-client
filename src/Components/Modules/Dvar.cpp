@@ -3,6 +3,7 @@
 namespace Components
 {
 	Utils::Signal<Scheduler::Callback> Dvar::RegistrationSignal;
+	const char* Dvar::ArchiveDvarPath = "userraw/archivedvars.cfg";
 
 	Dvar::Var::Var(const std::string& dvarName) : Var()
 	{
@@ -20,32 +21,37 @@ namespace Components
 	{
 		return this->dvar;
 	}
-	template <> char* Dvar::Var::get()
-	{
-		if (this->dvar && this->dvar->type == Game::dvar_type::DVAR_TYPE_STRING && this->dvar->current.string)
-		{
-			return const_cast<char*>(this->dvar->current.string);
-		}
 
-		return const_cast<char*>("");
-	}
 	template <> const char* Dvar::Var::get()
 	{
-		return this->get<char*>();
+		if (this->dvar == nullptr)
+			return "";
+
+		if (this->dvar->type == Game::dvar_type::DVAR_TYPE_STRING
+			|| this->dvar->type == Game::dvar_type::DVAR_TYPE_ENUM)
+		{
+			if (this->dvar->current.string != nullptr)
+				return this->dvar->current.string;
+		}
+
+		return "";
 	}
+
 	template <> int Dvar::Var::get()
 	{
-		if (this->dvar && this->dvar->type == Game::dvar_type::DVAR_TYPE_INT)
+		if (this->dvar && this->dvar->type == Game::dvar_type::DVAR_TYPE_INT || this->dvar->type == Game::dvar_type::DVAR_TYPE_ENUM)
 		{
 			return this->dvar->current.integer;
 		}
 
 		return 0;
 	}
+
 	template <> unsigned int Dvar::Var::get()
 	{
 		return static_cast<unsigned int>(this->get<int>());
 	}
+
 	template <> float Dvar::Var::get()
 	{
 		if (this->dvar && this->dvar->type == Game::dvar_type::DVAR_TYPE_FLOAT)
@@ -55,6 +61,7 @@ namespace Components
 
 		return 0;
 	}
+
 	template <> float* Dvar::Var::get()
 	{
 		static float val[4] = { 0 };
@@ -66,6 +73,7 @@ namespace Components
 
 		return val;
 	}
+
 	template <> bool Dvar::Var::get()
 	{
 		if (this->dvar && this->dvar->type == Game::dvar_type::DVAR_TYPE_BOOL)
@@ -75,6 +83,7 @@ namespace Components
 
 		return false;
 	}
+
 	template <> std::string Dvar::Var::get()
 	{
 		return this->get<const char*>();
@@ -84,45 +93,75 @@ namespace Components
 	{
 		this->set(const_cast<const char*>(string));
 	}
+
 	void Dvar::Var::set(const char* string)
 	{
-		if (this->dvar && this->dvar->name)
+		assert(this->dvar->type == Game::DVAR_TYPE_STRING);
+		if (this->dvar)
 		{
-			Game::Dvar_SetCommand(this->dvar->name, string);
+			Game::Dvar_SetString(this->dvar, string);
 		}
 	}
+
 	void Dvar::Var::set(const std::string& string)
 	{
 		this->set(string.data());
 	}
+
 	void Dvar::Var::set(int integer)
 	{
-		if (this->dvar && this->dvar->name)
+		assert(this->dvar->type == Game::DVAR_TYPE_INT);
+		if (this->dvar)
 		{
-			Game::Dvar_SetCommand(this->dvar->name, Utils::String::VA("%i", integer));
+			Game::Dvar_SetInt(this->dvar, integer);
 		}
 	}
+
 	void Dvar::Var::set(float value)
 	{
-		if (this->dvar && this->dvar->name)
+		assert(this->dvar->type == Game::DVAR_TYPE_FLOAT);
+		if (this->dvar)
 		{
-			Game::Dvar_SetCommand(this->dvar->name, Utils::String::VA("%f", value));
+			Game::Dvar_SetFloat(this->dvar, value);
+		}
+	}
+
+	void Dvar::Var::set(bool enabled)
+	{
+		assert(this->dvar->type == Game::DVAR_TYPE_BOOL);
+		if (this->dvar)
+		{
+			Game::Dvar_SetBool(this->dvar, enabled);
 		}
 	}
 
 	void Dvar::Var::setRaw(int integer)
 	{
+		assert(this->dvar->type == Game::DVAR_TYPE_INT);
 		if (this->dvar)
 		{
 			this->dvar->current.integer = integer;
+			this->dvar->latched.integer = integer;
 		}
 	}
 
 	void Dvar::Var::setRaw(float value)
 	{
+		assert(this->dvar->type == Game::DVAR_TYPE_FLOAT);
 		if (this->dvar)
 		{
 			this->dvar->current.value = value;
+			this->dvar->latched.value = value;
+		}
+	}
+
+	void Dvar::Var::setRaw(bool enabled)
+	{
+		assert(this->dvar->type == Game::DVAR_TYPE_BOOL);
+		if (this->dvar)
+		{
+			this->dvar->current.enabled = enabled;
+			this->dvar->latched.enabled = enabled;
 		}
 	}
 
@@ -130,14 +169,17 @@ namespace Components
 	{
 		return Game::Dvar_RegisterBool(name, value, flag.val, description);
 	}
+
 	template<> static Dvar::Var Dvar::Register(const char* name, const char* value, Dvar::Flag flag, const char* description)
 	{
 		return Game::Dvar_RegisterString(name, value, flag.val, description);
 	}
+
 	template<> static Dvar::Var Dvar::Register(const char* name, int value, int min, int max, Dvar::Flag flag, const char* description)
 	{
 		return Game::Dvar_RegisterInt(name, value, min, max, flag.val, description);
 	}
+
 	template<> static Dvar::Var Dvar::Register(const char* name, float value, float min, float max, Dvar::Flag flag, const char* description)
 	{
 		return Game::Dvar_RegisterFloat(name, value, min, max, flag.val, description);
@@ -146,6 +188,16 @@ namespace Components
 	void Dvar::OnInit(Utils::Slot<Scheduler::Callback> callback)
 	{
 		Dvar::RegistrationSignal.connect(callback);
+	}
+
+	void Dvar::ResetDvarsValue()
+	{
+		if (!Utils::IO::FileExists(Dvar::ArchiveDvarPath))
+			return;
+
+		Command::Execute("exec archivedvars.cfg", true);
+		// Clean up
+		Utils::IO::RemoveFile(Dvar::ArchiveDvarPath);
 	}
 
 	Game::dvar_t* Dvar::RegisterName(const char* name, const char* /*default*/, Game::dvar_flag flag, const char* description)
@@ -157,12 +209,12 @@ namespace Components
 		Scheduler::OnFrame([]()
 		{
 			static std::string lastValidName = "Unknown Soldier";
-			std::string name = Dvar::Var("name").get<char*>();
+			std::string name = Dvar::Var("name").get<const char*>();
 
 			// Don't perform any checks if name didn't change
 			if (name == lastValidName) return;
 
-			std::string saneName = Colors::Strip(Utils::String::Trim(name));
+			std::string saneName = TextRenderer::StripAllTextIcons(TextRenderer::StripColors(Utils::String::Trim(name)));
 			if (saneName.size() < 3 || (saneName[0] == '[' && saneName[1] == '{'))
 			{
 				Logger::Print("Username '%s' is invalid. It must at least be 3 characters long and not appear empty!\n", name.data());
@@ -220,11 +272,38 @@ namespace Components
 		return Game::Dvar_SetFromStringByNameFromSource(dvar, value, Game::DvarSetSource::DVAR_SOURCE_EXTERNAL);
 	}
 
+	void Dvar::SaveArchiveDvar(const Game::dvar_t* var)
+	{
+		if (!Utils::IO::FileExists(Dvar::ArchiveDvarPath))
+		{
+			Utils::IO::WriteFile(Dvar::ArchiveDvarPath,
+				"// generated by IW4x, do not modify\n");
+		}
+
+		Utils::IO::WriteFile(Dvar::ArchiveDvarPath,
+			Utils::String::VA("seta %s \"%s\"\n", var->name, Game::Dvar_DisplayableValue(var)), true);
+	}
+
+	void Dvar::DvarSetFromStringByNameStub(const char* dvarName, const char* value)
+	{
+		// Save the dvar original value if it has the archive flag
+		const auto* dvar = Game::Dvar_FindVar(dvarName);
+		if (dvar != nullptr && dvar->flags & Game::dvar_flag::DVAR_FLAG_SAVED)
+		{
+			Dvar::SaveArchiveDvar(dvar);
+		}
+
+		Utils::Hook::Call<void(const char*, const char*)>(0x4F52E0)(dvarName, value);
+	}
+
 	Dvar::Dvar()
 	{
 		// set flags of cg_drawFPS to archive
 		Utils::Hook::Or<BYTE>(0x4F8F69, Game::dvar_flag::DVAR_FLAG_SAVED);
 
+		// un-cheat camera_thirdPersonCrosshairOffset and add archive flags
+		Utils::Hook::Xor<BYTE>(0x447B41, Game::dvar_flag::DVAR_FLAG_CHEAT | Game::dvar_flag::DVAR_FLAG_SAVED);
+		
 		// un-cheat cg_fov and add archive flags
 		Utils::Hook::Xor<BYTE>(0x4F8E35, Game::dvar_flag::DVAR_FLAG_CHEAT | Game::dvar_flag::DVAR_FLAG_SAVED);
 		
@@ -284,10 +363,21 @@ namespace Components
 
 		// Entirely block setting cheat dvars internally without sv_cheats
 		//Utils::Hook(0x4F52EC, Dvar::SetFromStringByNameExternal, HOOK_CALL).install()->quick();
+
+		// Hook Dvar_SetFromStringByName inside CG_SetClientDvarFromServer so we can reset dvars when the player leaves the server
+		Utils::Hook(0x59386A, Dvar::DvarSetFromStringByNameStub, HOOK_CALL).install()->quick();
+
+		// If the game closed abruptly, the dvars would not have been restored
+
+		Dvar::OnInit([]
+		{
+			Dvar::ResetDvarsValue();
+		});
 	}
 
 	Dvar::~Dvar()
 	{
 		Dvar::RegistrationSignal.clear();
+		Utils::IO::RemoveFile(Dvar::ArchiveDvarPath);
 	}
 }

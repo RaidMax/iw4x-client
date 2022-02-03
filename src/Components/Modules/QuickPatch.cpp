@@ -2,7 +2,7 @@
 
 namespace Components
 {
-	int QuickPatch::FrameTime = 0;
+	Dvar::Var QuickPatch::r_customAspectRatio;
 
 	void QuickPatch::UnlockStats()
 	{
@@ -139,16 +139,15 @@ namespace Components
 		}
 	}
 
-	bool QuickPatch::InvalidNameCheck(char *dest, char *source, int size)
+	bool QuickPatch::InvalidNameCheck(char* dest, const char* source, int size)
 	{
-		strncpy(dest, source, size - 1);
-		dest[size - 1] = 0;
+		Utils::Hook::Call<void(char*, const char*, int)>(0x4D6F80)(dest, source, size); // I_strncpyz
 
 		for (int i = 0; i < size - 1; i++)
 		{
 			if (!dest[i]) break;
 
-			if (dest[i] > 125 || dest[i] < 32 || dest[i] == '%') 
+			if (dest[i] > 125 || dest[i] < 32 || dest[i] == '%')
 			{
 				return false;
 			}
@@ -172,7 +171,7 @@ namespace Components
 			push 1;
 			push kick_reason;
 			push edi;
-			mov eax, 0x004D1600;
+			mov eax, 0x004D1600; // SV_DropClientInternal
 			call eax;
 			add esp, 12;
 			popad;
@@ -184,7 +183,6 @@ namespace Components
 	}
 
 	Game::dvar_t* QuickPatch::g_antilag;
-
 	__declspec(naked) void QuickPatch::ClientEventsFireWeaponStub()
 	{
 		__asm
@@ -268,30 +266,31 @@ namespace Components
 		}
 	}
 
-	Game::dvar_t* QuickPatch::r_customAspectRatio;
 	Game::dvar_t* QuickPatch::Dvar_RegisterAspectRatioDvar(const char* name, char**, int defaultVal, int flags, const char* description)
 	{
-		static std::vector < char * > values =
+		static const char* r_aspectRatioEnum[] =
 		{
-			const_cast<char*>("auto"),
-			const_cast<char*>("standard"),
-			const_cast<char*>("wide 16:10"),
-			const_cast<char*>("wide 16:9"),
-			const_cast<char*>("custom"),
-			nullptr,
+			"auto",
+			"standard",
+			"wide 16:10",
+			"wide 16:9",
+			"custom",
+			nullptr
 		};
 
 		// register custom aspect ratio dvar
-		r_customAspectRatio = Game::Dvar_RegisterFloat("r_customAspectRatio", 16.0f / 9.0f, 4.0f / 3.0f, 63.0f / 9.0f, flags, "Screen aspect ratio. Divide the width by the height in order to get the aspect ratio value. For example: 16 / 9 = 1,77");
+		QuickPatch::r_customAspectRatio = Dvar::Register<float>("r_customAspectRatio",
+			16.0f / 9.0f, 4.0f / 3.0f, 63.0f / 9.0f, flags,
+			"Screen aspect ratio. Divide the width by the height in order to get the aspect ratio value. For example: 16 / 9 = 1,77");
 
 		// register enumeration dvar
-		return Game::Dvar_RegisterEnum(name, values.data(), defaultVal, flags, description);
+		return Game::Dvar_RegisterEnum(name, r_aspectRatioEnum, defaultVal, flags, description);
 	}
 
 	void QuickPatch::SetAspectRatio()
 	{
 		// set the aspect ratio
-		Utils::Hook::Set<float>(0x66E1C78, r_customAspectRatio->current.value);
+		Utils::Hook::Set<float>(0x66E1C78, r_customAspectRatio.get<float>());
 	}
 
 	__declspec(naked) void QuickPatch::SetAspectRatioStub()
@@ -341,9 +340,6 @@ namespace Components
 
 			// original code
 			mov eax, dword ptr[esp + 0xa0];
-			jmp collide;
-
-		collide:
 			push 0x00478376;
 			retn;
 
@@ -374,11 +370,6 @@ namespace Components
 			// dont eject if g_playerEjection is set to 0
 			je donteject;
 
-			// original code
-			cmp dword ptr[ebx + 19ch], edi;
-			jle eject;
-
-		eject:
 			push 0x005d8152;
 			retn;
 
@@ -388,56 +379,76 @@ namespace Components
 		}
 	}
 
-	template <typename T> std::function < T > ImportFunction(const std::string& dll, const std::string& function)
+	BOOL QuickPatch::IsDynClassnameStub(char* a1) 
 	{
-		auto dllHandle = GetModuleHandleA(&dll[0]);
-		auto procAddr = GetProcAddress(dllHandle, &function[0]);
+		auto version = Zones::GetEntitiesZoneVersion();
+		
+		if (version >= VERSION_LATEST_CODO)
+		{
+			for (auto i = 0; i < Game::spawnVars->numSpawnVars; i++)
+			{
+				char** kvPair = Game::spawnVars->spawnVars[i];
+				auto key = kvPair[0];
+				auto val = kvPair[1];
 
-		return std::function < T >(reinterpret_cast<T*>(procAddr));
+				bool isSpecOps = strncmp(key, "script_specialops", 17) == 0;
+				bool isSpecOpsOnly = val[0] == '1' && val[1] == '\0';
+
+				if (isSpecOps && isSpecOpsOnly)
+				{
+					// This will prevent spawning of any entity that contains "script_specialops: '1'" 
+					// It removes extra hitboxes / meshes on 461+ CODO multiplayer maps
+					return TRUE;
+				}
+			}
+		}
+
+		// Passthrough to the game's own IsDynClassname
+		return Utils::Hook::Call<BOOL(char*)>(0x444810)(a1);
+	}
+
+	void QuickPatch::CL_KeyEvent_OnEscape()
+    {
+		if (Game::Con_CancelAutoComplete())
+			return;
+
+		if (TextRenderer::HandleFontIconAutocompleteKey(0, TextRenderer::FONT_ICON_ACI_CONSOLE, Game::K_ESCAPE))
+			return;
+
+		// Close console
+		Game::Key_RemoveCatcher(0, ~Game::KEYCATCH_CONSOLE);
+    }
+
+	__declspec(naked) void QuickPatch::CL_KeyEvent_ConsoleEscape_Stub()
+	{
+	    __asm
+		{
+			pushad
+			call CL_KeyEvent_OnEscape
+			popad
+
+			// Exit CL_KeyEvent function
+			mov ebx, 0x4F66F2
+			jmp ebx
+		}
 	}
 
 	QuickPatch::QuickPatch()
 	{
-		QuickPatch::FrameTime = 0;
-		Scheduler::OnFrame([]()
-		{
-			QuickPatch::FrameTime = Game::Sys_Milliseconds();
-		});
-
 		// quit_hard
 		Command::Add("quit_hard", [](Command::Params*)
 		{
-			typedef enum _HARDERROR_RESPONSE_OPTION {
-				OptionAbortRetryIgnore,
-				OptionOk,
-				OptionOkCancel,
-				OptionRetryCancel,
-				OptionYesNo,
-				OptionYesNoCancel,
-				OptionShutdownSystem
-			} HARDERROR_RESPONSE_OPTION, *PHARDERROR_RESPONSE_OPTION;
-
-			typedef enum _HARDERROR_RESPONSE {
-				ResponseReturnToCaller,
-				ResponseNotHandled,
-				ResponseAbort,
-				ResponseCancel,
-				ResponseIgnore,
-				ResponseNo,
-				ResponseOk,
-				ResponseRetry,
-				ResponseYes
-			} HARDERROR_RESPONSE, *PHARDERROR_RESPONSE;
-
-			BOOLEAN hasPerms;
-			HARDERROR_RESPONSE response;
-
-			auto result = ImportFunction<NTSTATUS __stdcall(ULONG, BOOLEAN, BOOLEAN, PBOOLEAN)>("ntdll.dll", "RtlAdjustPrivilege")
-				(19, true, false, &hasPerms);
-
-			result = ImportFunction<NTSTATUS __stdcall(NTSTATUS, ULONG, LPCSTR, PVOID, HARDERROR_RESPONSE_OPTION, PHARDERROR_RESPONSE)>("ntdll.dll", "NtRaiseHardError")
-				(0xC000007B /*0x0000000A*/, 0, nullptr, nullptr, OptionShutdownSystem, &response);
+			int data = false;
+			const Utils::Library ntdll("ntdll.dll");
+			ntdll.invokePascal<void>("RtlAdjustPrivilege", 19, true, false, &data);
+			ntdll.invokePascal<void>("NtRaiseHardError", 0xC000007B, 0, nullptr, nullptr, 6, &data);
 		});
+
+		// Filtering any mapents that is intended for Spec:Ops gamemode (CODO) and prevent them from spawning
+		Utils::Hook(0x5FBD6E, QuickPatch::IsDynClassnameStub, HOOK_CALL).install()->quick();
+
+		// Hook escape handling on open console to change behaviour to close the console instead of only canceling autocomplete
+		Utils::Hook(0x4F66A3, CL_KeyEvent_ConsoleEscape_Stub, HOOK_JUMP).install()->quick();
 
 		// bounce dvar
 		sv_enableBounces = Game::Dvar_RegisterBool("sv_enableBounces", false, Game::DVAR_FLAG_REPLICATED, "Enables bouncing on the server");
@@ -465,8 +476,8 @@ namespace Components
 		Utils::Hook(0x578F52, QuickPatch::JavelinResetHookStub, HOOK_JUMP).install()->quick();
 
 		// Add ultrawide support
-		Utils::Hook(0x0051B13B, QuickPatch::Dvar_RegisterAspectRatioDvar, HOOK_CALL).install()->quick();
-		Utils::Hook(0x005063F3, QuickPatch::SetAspectRatioStub, HOOK_JUMP).install()->quick();
+		Utils::Hook(0x51B13B, QuickPatch::Dvar_RegisterAspectRatioDvar, HOOK_CALL).install()->quick();
+		Utils::Hook(0x5063F3, QuickPatch::SetAspectRatioStub, HOOK_JUMP).install()->quick();
 
 		// Make sure preDestroy is called when the game shuts down
 		Scheduler::OnShutdown(Loader::PreDestroy);
@@ -736,7 +747,7 @@ namespace Components
 		Utils::Hook(0x4A9F56, QuickPatch::MsgReadBitsCompressCheckCL, HOOK_CALL).install()->quick(); // CL_ParseServerMessage
 		Utils::Hook(0x407376, QuickPatch::SVCanReplaceServerCommand , HOOK_CALL).install()->quick(); // SV_CanReplaceServerCommand
 		Utils::Hook(0x5B67ED, QuickPatch::AtolAdjustPlayerLimit     , HOOK_CALL).install()->quick(); // PartyHost_HandleJoinPartyRequest
-
+		Utils::Hook::Nop(0x41698E, 5); // Disable Svcmd_EntityList_f
 
 		// Patch selectStringTableEntryInDvar
 		Utils::Hook::Set(0x405959, QuickPatch::SelectStringTableEntryInDvarStub);
@@ -945,34 +956,6 @@ namespace Components
 				Utils::IO::WriteFile("userraw/logs/matlog.txt", buffer);
 			}
 		});
-
-		Dvar::OnInit([]
-		{
-			Dvar::Register<bool>("r_drawAabbTrees", false, Game::DVAR_FLAG_USERCREATED, "Draw aabb trees");
-		});
-
-		Scheduler::OnFrame([]()
-		{
-			if (!Game::CL_IsCgameInitialized() || !Dvar::Var("r_drawAabbTrees").get<bool>()) return;
-
-			float cyan[4] = { 0.0f, 0.5f, 0.5f, 1.0f };
-            float red[4] = { 1.0f, 0.0f, 0.0f, 1.0f };
-
-			Game::clipMap_t* clipMap = *reinterpret_cast<Game::clipMap_t**>(0x7998E0);
-			//Game::GfxWorld* gameWorld = *reinterpret_cast<Game::GfxWorld**>(0x66DEE94);
-			if (!clipMap) return;
-
-            for (unsigned short i = 0; i < clipMap->smodelNodeCount; ++i)
-            {
-                Game::R_AddDebugBounds(cyan, &clipMap->smodelNodes[i].bounds);
-            }
-
-            for (unsigned int i = 0; i < clipMap->numStaticModels; i += 2)
-            {
-                Game::R_AddDebugBounds(red, &clipMap->staticModelList[i].absBounds);
-            }			
-		});
-
 
 		// Dvars
 		Dvar::Register<bool>("ui_streamFriendly", false, Game::DVAR_FLAG_SAVED, "Stream friendly UI");

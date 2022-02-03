@@ -6,6 +6,8 @@ namespace Components
 
 	bool Bans::IsBanned(Bans::Entry entry)
 	{
+		std::lock_guard<std::recursive_mutex> _(Bans::AccessMutex);
+
 		Bans::BanList list;
 		Bans::LoadBans(&list);
 
@@ -181,9 +183,9 @@ namespace Components
 		Game::client_t* client = &Game::svs_clients[num];
 
 		SteamID guid;
-		guid.bits = client->steamid;
+		guid.bits = client->steamID;
 
-		Bans::InsertBan({ guid, client->addr.ip });
+		Bans::InsertBan({ guid, client->netchan.remoteAddress.ip });
 
 		Game::SV_KickClientError(client, reason);
 	}

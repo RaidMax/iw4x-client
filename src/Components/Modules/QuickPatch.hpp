@@ -11,11 +11,8 @@ namespace Components
 		bool unitTest() override;
 
 		static void UnlockStats();
-		static int GetFrameTime() { return FrameTime; }
 
 	private:
-		static int FrameTime;
-
 		static void SelectStringTableEntryInDvarStub();
 
 		static int SVCanReplaceServerCommand(Game::client_t *client, const char *cmd);
@@ -28,13 +25,13 @@ namespace Components
 
 		static void JavelinResetHookStub();
 
-		static bool InvalidNameCheck(char *dest, char *source, int size);
+		static bool InvalidNameCheck(char* dest, const char* source, int size);
 		static void InvalidNameStub();
 
 		static Game::dvar_t* sv_enableBounces;
 		static void BounceStub();
 
-		static Game::dvar_t* r_customAspectRatio;
+		static Dvar::Var r_customAspectRatio;
 		static Game::dvar_t* Dvar_RegisterAspectRatioDvar(const char* name, char** enumValues, int defaultVal, int flags, const char* description);
 		static void SetAspectRatioStub();
 		static void SetAspectRatio();
@@ -47,5 +44,9 @@ namespace Components
 		static void PlayerCollisionStub();
 		static Game::dvar_t* g_playerEjection;
 		static void PlayerEjectionStub();
+		static BOOL IsDynClassnameStub(char* a1);
+
+		static void CL_KeyEvent_OnEscape();
+		static void CL_KeyEvent_ConsoleEscape_Stub();
 	};
 }

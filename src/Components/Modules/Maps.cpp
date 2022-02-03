@@ -241,14 +241,13 @@ namespace Components
 		{
 			if (Flags::HasFlag("dump"))
 			{
-				Utils::IO::WriteFile(Utils::String::VA("raw/%s.ents", name.data()), asset.mapEnts->entityString);
+				Utils::IO::WriteFile(Utils::String::VA("raw/%s.ents", name.data()), asset.mapEnts->entityString, true);
 			}
 
-			static std::string mapEntities;
 			FileSystem::File ents(name + ".ents");
 			if (ents.exists())
 			{
-				mapEntities = ents.getBuffer();
+				const auto& mapEntities = ents.getBuffer();
 				asset.mapEnts->entityString = const_cast<char*>(mapEntities.data());
 				asset.mapEnts->numEntityChars = mapEntities.size() + 1;
 			}
@@ -560,7 +559,7 @@ namespace Components
 			}
 
 			hasDlc.push_back(hasAllMaps);
-			Dvar::Var(Utils::String::VA("isDlcInstalled_%d", pack.index)).setRaw(hasAllMaps ? 1 : 0);
+			Dvar::Var(Utils::String::VA("isDlcInstalled_%d", pack.index)).set(hasAllMaps ? true : false);
 		}
 
 		// Must have all of dlc 3 to 5 or it causes issues
@@ -571,7 +570,7 @@ namespace Components
 			sentMessage = true;
 		}
 
-		Dvar::Var("isDlcInstalled_All").setRaw(hasAllDlcs ? 1 : 0);
+		Dvar::Var("isDlcInstalled_All").set(hasAllDlcs ? true : false);
 	}
 
 	bool Maps::IsCustomMap()
@@ -739,6 +738,23 @@ namespace Components
 
 		Utils::Hook::Call<void(Game::gentity_s*, int, int)>(0x408910)(ent, unk, unk2);
 	}
+
+	bool Maps::SV_SetTriggerModelHook(Game::gentity_s* ent) {
+
+		// Use me for debugging
+		//std::string classname = Game::SL_ConvertToString(ent->script_classname);
+		//std::string targetname = Game::SL_ConvertToString(ent->targetname);
+
+		return Utils::Hook::Call<bool(Game::gentity_s*)>(0x5050C0)(ent);
+	}
+
+	int16 Maps::CM_TriggerModelBounds(int modelPointer, Game::Bounds* bounds) {
+#ifdef DEBUG
+		Game::MapEnts* ents = *reinterpret_cast<Game::MapEnts**>(0x1AA651C);  // Use me for debugging
+		(void)ents;
+#endif
+		return Utils::Hook::Call<int16(int, Game::Bounds*)>(0x4416C0)(modelPointer, bounds);
+	}
 	
 	Maps::Maps()
 	{
@@ -755,6 +771,7 @@ namespace Components
 			Maps::AddDlc({ 6, "Freighter", {"mp_cargoship_sh"} });
 			Maps::AddDlc({ 7, "Resurrection Pack", {"mp_shipment_long", "mp_rust_long", "mp_firingrange"} });
 			Maps::AddDlc({ 8, "Recycled Pack", {"mp_bloc_sh", "mp_crash_tropical", "mp_estate_tropical", "mp_fav_tropical", "mp_storm_spring"} });
+			Maps::AddDlc({ 9, "Classics Pack #3", {"mp_farm", "mp_backlot", "mp_pipeline", "mp_countdown", "mp_crash_snow", "mp_carentan"}});
 
 			Maps::UpdateDlcStatus();
 
@@ -766,7 +783,7 @@ namespace Components
 				{
 					if (pack.index == dlc)
 					{
-						ShellExecute(0, 0, L"https://xlabs.dev/support_iw4x_client.html", 0, 0, SW_SHOW);
+						ShellExecuteW(0, 0, L"https://xlabs.dev/support_iw4x_client.html", 0, 0, SW_SHOW);
 						return;
 					}
 				}
@@ -778,6 +795,15 @@ namespace Components
 		// disable turrets on CoD:OL 448+ maps for now
 		Utils::Hook(0x5EE577, Maps::G_SpawnTurretHook, HOOK_CALL).install()->quick();
 		Utils::Hook(0x44A4D5, Maps::G_SpawnTurretHook, HOOK_CALL).install()->quick();
+
+#ifdef DEBUG
+		// Check trigger models
+		Utils::Hook(0x5FC0F1, Maps::SV_SetTriggerModelHook, HOOK_CALL).install()->quick();
+		Utils::Hook(0x5FC2671, Maps::SV_SetTriggerModelHook, HOOK_CALL).install()->quick();
+		Utils::Hook(0x5050D4, Maps::CM_TriggerModelBounds, HOOK_CALL).install()->quick();
+#endif
+
+		// 
 		
 //#define SORT_SMODELS
 #if !defined(DEBUG) || !defined(SORT_SMODELS)

@@ -10,6 +10,8 @@ namespace Components
 	bool ZoneBuilder::Terminate;
 	std::thread ZoneBuilder::CommandThread;
 
+	Dvar::Var ZoneBuilder::PreferDiskAssetsDvar;
+
 	ZoneBuilder::Zone::Zone(const std::string& name) : indexStart(0), externalSize(0),
 
 		// Reserve 100MB by default.
@@ -44,7 +46,7 @@ namespace Components
 
 			if (!found)
 			{
-				Logger::Error("Asset %s of type %s was loaded, but not written!", name.data(), Game::DB_GetXAssetTypeName(subAsset.type));
+				Logger::Print("Asset %s of type %s was loaded, but not written!", name.data(), Game::DB_GetXAssetTypeName(subAsset.type));
 			}
 		}
 
@@ -222,8 +224,10 @@ namespace Components
 		}
 
 		Game::XAssetHeader assetHeader = AssetHandler::FindAssetForZone(type, name, this, isSubAsset);
+
 		if (!assetHeader.data)
-		{			Logger::Error("Error: Missing asset '%s' of type '%s'\n", name.data(), Game::DB_GetXAssetTypeName(type));
+		{		
+			Logger::Error("Error: Missing asset '%s' of type '%s'\n", name.data(), Game::DB_GetXAssetTypeName(type));
 			return false;
 		}
 
@@ -376,7 +380,7 @@ namespace Components
 
 		Game::XFileHeader header =
 		{
-#ifdef DEBUG
+#ifndef GENERATE_IW4X_SPECIFIC_ZONES
 			XFILE_MAGIC_UNSIGNED,
 #else
 			XFILE_HEADER_IW4X | (static_cast<unsigned __int64>(XFILE_VERSION_IW4X) << 32),
@@ -392,7 +396,7 @@ namespace Components
 
 		std::string zoneBuffer = this->buffer.toBuffer();
 
-#ifndef DEBUG
+#ifdef GENERATE_IW4X_SPECIFIC_ZONES
 		// Insert a random byte, this will destroy the whole alignment and result in a crash, if not handled
 		zoneBuffer.insert(zoneBuffer.begin(), static_cast<char>(Utils::Cryptography::Rand::GenerateInt()));
 
@@ -842,12 +846,12 @@ namespace Components
 
 		Command::Add("quit", [](Command::Params*)
 		{
-			ZoneBuilder::Quit();
+			Game::Com_Quitf_t();
 		});
 
 		Command::Add("error", [](Command::Params*)
 		{
-			Game::Com_Error(0, "This is a test %s\n", "error");
+			Game::Com_Error(Game::ERR_FATAL, "This is a test %s\n", "error");
 		});
 
 		// now load default assets and shaders
@@ -917,12 +921,6 @@ namespace Components
 
 		// ReSharper disable once CppUnreachableCode
 		return 0;
-	}
-
-	void ZoneBuilder::Quit()
-	{
-		//TerminateProcess(GetCurrentProcess(), 0);
-		ExitProcess(0);
 	}
 
 	void ZoneBuilder::HandleError(int level, const char* format, ...)
@@ -1085,9 +1083,6 @@ namespace Components
 
 			// set new entry point
 			Utils::Hook(0x4513DA, ZoneBuilder::EntryPoint, HOOK_JUMP).install()->quick();
-
-			// set quit handler
-			Utils::Hook(0x4D4000, ZoneBuilder::Quit, HOOK_JUMP).install()->quick();
 
 			// handle com_error calls
 			Utils::Hook(0x4B22D0, ZoneBuilder::HandleError, HOOK_JUMP).install()->quick();
@@ -1305,7 +1300,7 @@ namespace Components
 				}, nullptr, false);
 
 				// HACK: set language to 'techsets' to load from that dir
-				char* language = Utils::Hook::Get<char*>(0x649E740);
+				const char* language = Utils::Hook::Get<const char*>(0x649E740);
 				Utils::Hook::Set<const char*>(0x649E740, "techsets");
 
 				// load generated techset fastfiles
@@ -1417,7 +1412,7 @@ namespace Components
 				// build final techsets fastfile
 				if (subCount > 24)
 				{
-					Logger::ErrorPrint(1, "How did you have 576 fastfiles?\n");
+					Logger::ErrorPrint(Game::ERR_DROP, "How did you have 576 fastfiles?\n");
 				}
 
 				curTechsets_list.clear();
@@ -1452,7 +1447,7 @@ namespace Components
 				Utils::IO::WriteFile("zone_source/techsets/techsets.csv", csvStr.data());
 
 				// set language back
-				Utils::Hook::Set<char*>(0x649E740, language);
+				Utils::Hook::Set<const char*>(0x649E740, language);
 
 				Logger::Print("Building zone 'techsets/techsets'...\n");
 				Zone("techsets/techsets").build();
@@ -1529,6 +1524,8 @@ namespace Components
 				Logger::Print("%s\n", json11::Json(images).dump().data());
 				Logger::Print("------------------- END IWI DUMP -------------------\n");
 			});
+
+			ZoneBuilder::PreferDiskAssetsDvar = Dvar::Register<bool>("zb_prefer_disk_assets", false, Game::DVAR_FLAG_NONE, "Should zonebuilder prefer in-memory assets (requirements) or disk assets, when both are present?");
 		}
 	}
 

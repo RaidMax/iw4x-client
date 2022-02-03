@@ -74,6 +74,11 @@ newoption {
 	description = "Upload minidumps even for Debug builds."
 }
 
+newoption {
+	trigger = "iw4x-zones",
+	description = "Zonebuilder generates iw4x zones that cannot be loaded without IW4x specific patches."
+}
+
 newaction {
 	trigger = "version",
 	description = "Returns the version string for the current commit of the source code.",
@@ -188,7 +193,6 @@ require "premake/pdcurses"
 require "premake/protobuf"
 require "premake/zlib"
 require "premake/udis86"
-require "premake/iw4mvm"
 require "premake/dxsdk"
 
 json11.setup
@@ -235,15 +239,6 @@ udis86.setup
 {
 	source = path.join(depsBasePath, "udis86"),
 }
-iw4mvm.setup
-{
-	defines = {
-		"IW4X",
-		"DETOURS_X86",
-		"DETOURS_32BIT",
-	},
-	source = path.join(depsBasePath, "iw4mvm"),
-}
 dxsdk.setup
 {
 	source = path.join(depsBasePath, "dxsdk"),
@@ -255,34 +250,44 @@ workspace "iw4x"
 	objdir "%{wks.location}/obj"
 	targetdir "%{wks.location}/bin/%{cfg.buildcfg}"
 	buildlog "%{wks.location}/obj/%{cfg.architecture}/%{cfg.buildcfg}/%{prj.name}/%{prj.name}.log"
+
 	configurations { "Debug", "Release" }
+
+	language "C++"
+	cppdialect "C++17"
+
 	architecture "x86"
 	platforms "x86"
-	--exceptionhandling ("SEH")
 
+	systemversion "latest"
+	symbols "On"
 	staticruntime "On"
+	editandcontinue "Off"
+	warnings "Extra"
+	characterset "ASCII"
 
-	configuration "windows"
-		defines { "_WINDOWS", "WIN32" }
+	flags { "NoIncrementalLink", "NoMinimalRebuild", "MultiProcessorCompile", "No64BitChecks" }
 
-	configuration "Release*"
-		defines { "NDEBUG" }
-		flags { "MultiProcessorCompile", "LinkTimeOptimization", "No64BitChecks" }
+	filter "platforms:x86"
+		defines {"_WINDOWS", "WIN32"}
+	filter {}
+
+	filter "configurations:Release"
 		optimize "On"
+		buildoptions { "/GL" }
+		linkoptions { "/IGNORE:4702", "/LTCG" }
+		defines { "NDEBUG" }
+		flags { "FatalCompileWarnings", "FatalLinkWarnings" }
 
 		if not _OPTIONS["force-unit-tests"] then
 			rtti ("Off")
 		end
+	filter {}
 
-	configuration "Debug*"
-		defines { "DEBUG", "_DEBUG" }
-		flags { "MultiProcessorCompile", "No64BitChecks" }
+	filter "configurations:Debug"
 		optimize "Debug"
-		if symbols ~= nil then
-			symbols "On"
-		else
-			flags { "Symbols" }
-		end
+		defines { "DEBUG", "_DEBUG" }
+	filter {}
 
 	project "iw4x"
 		kind "SharedLib"
@@ -324,6 +329,9 @@ workspace "iw4x"
 		if _OPTIONS["force-exception-handler"] then
 			defines { "FORCE_EXCEPTION_HANDLER" }
 		end
+		if _OPTIONS["iw4x-zones"] then
+			defines { "GENERATE_IW4X_SPECIFIC_ZONES" }
+		end
 
 		-- Pre-compiled header
 		pchheader "STDInclude.hpp" -- must be exactly same as used in #include directives
@@ -339,7 +347,6 @@ workspace "iw4x"
 		protobuf.import()
 		zlib.import()
 		udis86.import()
-		--iw4mvm.import()
 		dxsdk.import()
 
 		-- fix vpaths for protobuf sources
@@ -393,23 +400,6 @@ workspace "iw4x"
 			}
 		end
 
-		-- Specific configurations
-		flags { "UndefinedIdentifiers" }
-		warnings "Extra"
-
-		if symbols ~= nil then
-			symbols "On"
-		else
-			flags { "Symbols" }
-		end
-
-		configuration "Release*"
-			flags {
-				"FatalCompileWarnings",
-				"FatalLinkWarnings",
-			}
-		configuration {}
-
 		--[[
 		-- Generate source code from protobuf definitions
 		rules { "ProtobufCompiler" }
@@ -453,14 +443,6 @@ workspace "iw4x"
 		protobuf.project()
 		zlib.project()
 		udis86.project()
-		--iw4mvm.project()
-		
-workspace "*"
-	buildoptions {
-				"/std:c++latest"
-			}
-	systemversion "latest"
-	defines { "_SILENCE_ALL_CXX17_DEPRECATION_WARNINGS" }
 
 rule "ProtobufCompiler"
 	display "Protobuf compiler"
